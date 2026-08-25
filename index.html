@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- YouTube Error 153 대응 -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <meta name="theme-color" content="#f5f7f5" />
+
+    <meta name="description" content="작가 협업 페이지" />
+
+    <title>협업 작가</title>
+
+    <link rel="stylesheet" href="./global.css" />
+  </head>
+
+  <body>
+    <section class="artmug-window" aria-label="작가 협업 안내">
+      <div class="window-inner">
+        <header class="page-header">
+          <p id="page-eyebrow" class="eyebrow">COLLABORATION · LIVE2D LD</p>
+
+          <h1 id="page-title">협업 작가</h1>
+        </header>
+
+        <div class="artist-wrapper">
+          <div id="artist-grid" class="artist-grid" aria-live="polite"></div>
+
+          <!-- 모바일에서만 사용 -->
+          <div id="artist-dots" class="artist-dots" aria-label="작가 카드 위치"></div>
+        </div>
+      </div>
+    </section>
+
+    <!--
+      중요:
+      data.js를 먼저 불러온 다음
+      script.js를 불러와야 합니다.
+    -->
+    <script src="./data.js"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>
