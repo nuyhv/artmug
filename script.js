@@ -51,7 +51,6 @@ function renderPageHeader() {
 
   eyebrow.textContent = currentCategory.eyebrow;
   title.textContent = currentCategory.title;
-
   document.title = `${currentCategory.title} · ${currentType}`;
 }
 
@@ -78,7 +77,6 @@ const pageOrigin = window.location.origin;
 
 // ============================================================
 // iframe 높이 자동 전달
-// ============================================================
 //
 // 이 페이지가 iframe 내부에서 실행될 경우
 // 실제 문서 높이를 부모 페이지로 전달합니다.
@@ -91,6 +89,7 @@ const pageOrigin = window.location.origin;
 // ============================================================
 
 let iframeResizeFrame = null;
+let lastSentIframeHeight = 0;
 
 function getDocumentHeight() {
   const html = document.documentElement;
@@ -110,6 +109,39 @@ function getDocumentHeight() {
   );
 }
 
+function sendResizeMessage() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (window.parent === window) {
+    return;
+  }
+
+  const height = getDocumentHeight();
+
+  if (!Number.isFinite(height) || height <= 0) {
+    return;
+  }
+
+  const roundedHeight = Math.ceil(height);
+
+  // 같은 높이를 무한 반복해서 보내는 것 방지
+  if (roundedHeight === lastSentIframeHeight) {
+    return;
+  }
+
+  lastSentIframeHeight = roundedHeight;
+
+  window.parent.postMessage(
+    {
+      type: "resize",
+      height: roundedHeight,
+    },
+    "*",
+  );
+}
+
 function notifyParentResize() {
   if (typeof window === "undefined") {
     return;
@@ -126,27 +158,52 @@ function notifyParentResize() {
   iframeResizeFrame = requestAnimationFrame(() => {
     iframeResizeFrame = null;
 
-    const height = getDocumentHeight();
-
-    if (!Number.isFinite(height) || height <= 0) {
-      return;
-    }
-
-    window.parent.postMessage(
-      {
-        type: "resize",
-        height: Math.ceil(height),
-      },
-      "*",
-    );
+    sendResizeMessage();
   });
 }
 
+// ============================================================
+// 부모 페이지에서 높이를 다시 요청할 수 있도록 처리
+// ============================================================
+
+window.addEventListener("message", (event) => {
+  if (!event.data || event.data.type !== "request-resize") {
+    return;
+  }
+
+  notifyParentResize();
+});
+
+// ============================================================
+// iframe ResizeObserver
+// ============================================================
+
 function setupIframeResizeObserver() {
-  // 최초 전달
+  // 바로 한 번
   notifyParentResize();
 
-  // ResizeObserver를 지원하지 않는 환경 대비
+  // 브라우저 레이아웃 계산 후
+  requestAnimationFrame(() => {
+    notifyParentResize();
+  });
+
+  // 이미지 / YouTube / 폰트 로딩 등을 고려
+  setTimeout(() => {
+    notifyParentResize();
+  }, 100);
+
+  setTimeout(() => {
+    notifyParentResize();
+  }, 300);
+
+  setTimeout(() => {
+    notifyParentResize();
+  }, 500);
+
+  setTimeout(() => {
+    notifyParentResize();
+  }, 1000);
+
   if (typeof ResizeObserver === "undefined") {
     window.addEventListener("load", notifyParentResize);
     window.addEventListener("resize", notifyParentResize);
@@ -157,13 +214,23 @@ function setupIframeResizeObserver() {
     notifyParentResize();
   });
 
-  observer.observe(document.documentElement);
+  if (document.documentElement) {
+    observer.observe(document.documentElement);
+  }
 
   if (document.body) {
     observer.observe(document.body);
   }
 
   window.addEventListener("resize", notifyParentResize);
+
+  window.addEventListener("load", () => {
+    notifyParentResize();
+
+    requestAnimationFrame(() => {
+      notifyParentResize();
+    });
+  });
 }
 
 // ============================================================
@@ -192,8 +259,6 @@ function loadYoutubeApi() {
 
       resolve(window.YT);
 
-      // YouTube API 로드로 DOM 내부 구조가 변경될 가능성이 있으므로
-      // 부모 iframe 높이도 다시 확인합니다.
       notifyParentResize();
     };
 
@@ -205,7 +270,6 @@ function loadYoutubeApi() {
       const script = document.createElement("script");
 
       script.src = "https://www.youtube.com/iframe_api";
-
       script.async = true;
 
       document.head.appendChild(script);
@@ -313,7 +377,6 @@ function closeYoutubeModal() {
   activeModal.remove();
   activeModal = null;
 
-  // 모달 제거 후 높이 다시 확인
   notifyParentResize();
 }
 
@@ -369,7 +432,6 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
 
   closeButton.type = "button";
   closeButton.className = "youtube-modal-close";
-
   closeButton.setAttribute("aria-label", "영상 닫기");
 
   closeButton.innerHTML = `
@@ -394,7 +456,6 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
   const title = document.createElement("div");
 
   title.className = "youtube-modal-title";
-
   title.textContent = artistName || "YouTube";
 
   const playerWrapper = document.createElement("div");
@@ -450,7 +511,6 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
       events: {
         onReady(event) {
           event.target.playVideo();
-
           notifyParentResize();
         },
 
@@ -483,7 +543,6 @@ function createArtistCard(artist) {
     const message = document.createElement("div");
 
     message.className = "video-empty";
-
     message.textContent = "샘플 준비중입니다.";
 
     video.appendChild(message);
@@ -521,7 +580,6 @@ function createArtistCard(artist) {
     const videoButton = document.createElement("button");
 
     videoButton.type = "button";
-
     videoButton.className = "video-click-target";
 
     videoButton.setAttribute("aria-label", `${artist.name} YouTube 영상 크게 보기`);
@@ -703,13 +761,11 @@ function createArtistCard(artist) {
   const link = document.createElement("a");
 
   link.className = "artist-link";
-
   link.textContent = "작가 페이지 바로가기";
 
   link.href = artist.pageUrl || "#";
 
   link.target = "_blank";
-
   link.rel = "noopener noreferrer";
 
   actions.appendChild(link);
@@ -762,6 +818,7 @@ function updateArtistDots() {
     dots.classList.remove("is-visible");
 
     notifyParentResize();
+
     return;
   }
 
@@ -812,6 +869,7 @@ function createArtistDots() {
     dots.classList.remove("is-visible");
 
     notifyParentResize();
+
     return;
   }
 
@@ -819,6 +877,7 @@ function createArtistDots() {
     const dot = document.createElement("button");
 
     dot.type = "button";
+
     dot.className = "artist-dot";
 
     dot.setAttribute("aria-label", `${index + 1}번 작가 보기`);
@@ -977,7 +1036,7 @@ function renderArtists() {
     grid.appendChild(createArtistCard(artist));
   });
 
-  // 카드가 실제로 DOM에 추가된 이후 높이 측정
+  // 카드가 실제 DOM에 추가된 이후 높이 측정
   notifyParentResize();
 }
 
