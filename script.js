@@ -28,6 +28,7 @@ const hasValidType =
   requestedType && Object.prototype.hasOwnProperty.call(categoryData, requestedType);
 
 const currentType = hasValidType ? requestedType : null;
+
 const currentCategory = hasValidType ? categoryData[currentType] : null;
 
 // ============================================================
@@ -51,6 +52,7 @@ function renderPageHeader() {
 
   eyebrow.textContent = currentCategory.eyebrow;
   title.textContent = currentCategory.title;
+
   document.title = `${currentCategory.title} · ${currentType}`;
 }
 
@@ -82,6 +84,7 @@ const pageOrigin = window.location.origin;
 // 실제 문서 높이를 부모 페이지로 전달합니다.
 //
 // 부모 페이지에서는:
+//
 // message.type === "resize"
 // event.source === 해당 iframe
 //
@@ -109,7 +112,7 @@ function getDocumentHeight() {
   );
 }
 
-function sendResizeMessage() {
+function sendResizeMessage(force = false) {
   if (typeof window === "undefined") {
     return;
   }
@@ -126,8 +129,12 @@ function sendResizeMessage() {
 
   const roundedHeight = Math.ceil(height);
 
-  // 같은 높이를 무한 반복해서 보내는 것 방지
-  if (roundedHeight === lastSentIframeHeight) {
+  // 일반적인 ResizeObserver 호출에서는
+  // 같은 높이를 계속 보내지 않도록 방지합니다.
+  //
+  // force === true인 경우에는 같은 높이라도
+  // 다시 전송합니다.
+  if (!force && roundedHeight === lastSentIframeHeight) {
     return;
   }
 
@@ -142,7 +149,7 @@ function sendResizeMessage() {
   );
 }
 
-function notifyParentResize() {
+function notifyParentResize(force = false) {
   if (typeof window === "undefined") {
     return;
   }
@@ -158,12 +165,16 @@ function notifyParentResize() {
   iframeResizeFrame = requestAnimationFrame(() => {
     iframeResizeFrame = null;
 
-    sendResizeMessage();
+    sendResizeMessage(force);
   });
 }
 
 // ============================================================
 // 부모 페이지에서 높이를 다시 요청할 수 있도록 처리
+//
+// 현재 부모 페이지가 request-resize를 보내는 경우에도
+// iframe에서 다시 높이를 측정해서 전달할 수 있도록 합니다.
+//
 // ============================================================
 
 window.addEventListener("message", (event) => {
@@ -171,7 +182,7 @@ window.addEventListener("message", (event) => {
     return;
   }
 
-  notifyParentResize();
+  notifyParentResize(true);
 });
 
 // ============================================================
@@ -179,39 +190,65 @@ window.addEventListener("message", (event) => {
 // ============================================================
 
 function setupIframeResizeObserver() {
-  // 바로 한 번
-  notifyParentResize();
+  // ----------------------------------------------------------
+  // 최초 측정
+  // ----------------------------------------------------------
 
-  // 브라우저 레이아웃 계산 후
+  notifyParentResize(true);
+
+  // ----------------------------------------------------------
+  // 브라우저 레이아웃 계산 이후
+  // ----------------------------------------------------------
+
   requestAnimationFrame(() => {
-    notifyParentResize();
+    notifyParentResize(true);
   });
 
-  // 이미지 / YouTube / 폰트 로딩 등을 고려
+  // ----------------------------------------------------------
+  // iframe 부모의 message 이벤트 등록 타이밍을 고려하여
+  // 초기 높이를 여러 번 재전송합니다.
+  // ----------------------------------------------------------
+
   setTimeout(() => {
-    notifyParentResize();
+    notifyParentResize(true);
   }, 100);
 
   setTimeout(() => {
-    notifyParentResize();
+    notifyParentResize(true);
   }, 300);
 
   setTimeout(() => {
-    notifyParentResize();
+    notifyParentResize(true);
   }, 500);
 
   setTimeout(() => {
-    notifyParentResize();
+    notifyParentResize(true);
   }, 1000);
 
+  // ----------------------------------------------------------
+  // ResizeObserver 미지원 환경
+  // ----------------------------------------------------------
+
   if (typeof ResizeObserver === "undefined") {
-    window.addEventListener("load", notifyParentResize);
-    window.addEventListener("resize", notifyParentResize);
+    window.addEventListener("load", () => {
+      notifyParentResize(true);
+    });
+
+    window.addEventListener("resize", () => {
+      notifyParentResize(true);
+    });
+
     return;
   }
 
+  // ----------------------------------------------------------
+  // 실제 문서 높이 변화 감시
+  // ----------------------------------------------------------
+
   const observer = new ResizeObserver(() => {
-    notifyParentResize();
+    // 실제 높이가 변경된 경우에만
+    // 일반 resize 전달
+    notifyParentResize(false);
   });
 
   if (document.documentElement) {
@@ -222,13 +259,23 @@ function setupIframeResizeObserver() {
     observer.observe(document.body);
   }
 
-  window.addEventListener("resize", notifyParentResize);
+  // ----------------------------------------------------------
+  // 브라우저 크기 변경
+  // ----------------------------------------------------------
+
+  window.addEventListener("resize", () => {
+    notifyParentResize(true);
+  });
+
+  // ----------------------------------------------------------
+  // 페이지 로딩 완료
+  // ----------------------------------------------------------
 
   window.addEventListener("load", () => {
-    notifyParentResize();
+    notifyParentResize(true);
 
     requestAnimationFrame(() => {
-      notifyParentResize();
+      notifyParentResize(true);
     });
   });
 }
@@ -259,7 +306,9 @@ function loadYoutubeApi() {
 
       resolve(window.YT);
 
-      notifyParentResize();
+      // YouTube API 로드로 DOM 내부 구조가 변경될
+      // 가능성이 있으므로 부모 iframe 높이를 다시 확인
+      notifyParentResize(true);
     };
 
     const existingScript = document.querySelector(
@@ -270,6 +319,7 @@ function loadYoutubeApi() {
       const script = document.createElement("script");
 
       script.src = "https://www.youtube.com/iframe_api";
+
       script.async = true;
 
       document.head.appendChild(script);
@@ -377,7 +427,8 @@ function closeYoutubeModal() {
   activeModal.remove();
   activeModal = null;
 
-  notifyParentResize();
+  // 모달 제거 후 높이 다시 확인
+  notifyParentResize(true);
 }
 
 // ============================================================
@@ -412,8 +463,11 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
   const modal = document.createElement("div");
 
   modal.className = "youtube-modal";
+
   modal.setAttribute("role", "dialog");
+
   modal.setAttribute("aria-modal", "true");
+
   modal.setAttribute("aria-label", `${artistName} YouTube 영상`);
 
   const backdrop = document.createElement("div");
@@ -431,7 +485,9 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
   const closeButton = document.createElement("button");
 
   closeButton.type = "button";
+
   closeButton.className = "youtube-modal-close";
+
   closeButton.setAttribute("aria-label", "영상 닫기");
 
   closeButton.innerHTML = `
@@ -456,6 +512,7 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
   const title = document.createElement("div");
 
   title.className = "youtube-modal-title";
+
   title.textContent = artistName || "YouTube";
 
   const playerWrapper = document.createElement("div");
@@ -486,7 +543,7 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
 
   document.addEventListener("keydown", activeModalKeydownHandler);
 
-  notifyParentResize();
+  notifyParentResize(true);
 
   void loadYoutubeApi().then(() => {
     if (activeModal !== modal || !window.YT || typeof window.YT.Player !== "function") {
@@ -511,7 +568,8 @@ function openYoutubeModal(videoId, artistName, previewPlayer) {
       events: {
         onReady(event) {
           event.target.playVideo();
-          notifyParentResize();
+
+          notifyParentResize(true);
         },
 
         onError(event) {
@@ -543,6 +601,7 @@ function createArtistCard(artist) {
     const message = document.createElement("div");
 
     message.className = "video-empty";
+
     message.textContent = "샘플 준비중입니다.";
 
     video.appendChild(message);
@@ -564,10 +623,12 @@ function createArtistCard(artist) {
         thumbnail.src = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/mqdefault.jpg`;
       }
 
-      notifyParentResize();
+      notifyParentResize(true);
     });
 
-    thumbnail.addEventListener("load", notifyParentResize);
+    thumbnail.addEventListener("load", () => {
+      notifyParentResize(true);
+    });
 
     video.appendChild(thumbnail);
 
@@ -580,6 +641,7 @@ function createArtistCard(artist) {
     const videoButton = document.createElement("button");
 
     videoButton.type = "button";
+
     videoButton.className = "video-click-target";
 
     videoButton.setAttribute("aria-label", `${artist.name} YouTube 영상 크게 보기`);
@@ -598,7 +660,7 @@ function createArtistCard(artist) {
         card.classList.remove("is-playing");
       }
 
-      notifyParentResize();
+      notifyParentResize(false);
     };
 
     const setPreviewUnavailable = () => {
@@ -619,7 +681,7 @@ function createArtistCard(artist) {
         }
       }
 
-      notifyParentResize();
+      notifyParentResize(true);
     };
 
     videoButton.addEventListener("click", (event) => {
@@ -685,7 +747,7 @@ function createArtistCard(artist) {
               event.target.playVideo();
             }
 
-            notifyParentResize();
+            notifyParentResize(true);
           },
 
           onStateChange(event) {
@@ -761,11 +823,13 @@ function createArtistCard(artist) {
   const link = document.createElement("a");
 
   link.className = "artist-link";
+
   link.textContent = "작가 페이지 바로가기";
 
   link.href = artist.pageUrl || "#";
 
   link.target = "_blank";
+
   link.rel = "noopener noreferrer";
 
   actions.appendChild(link);
@@ -817,7 +881,7 @@ function updateArtistDots() {
   if (!isMobileViewport() || cards.length <= 1) {
     dots.classList.remove("is-visible");
 
-    notifyParentResize();
+    notifyParentResize(false);
 
     return;
   }
@@ -827,6 +891,7 @@ function updateArtistDots() {
   const scrollLeft = grid.scrollLeft;
 
   let currentIndex = 0;
+
   let closestDistance = Infinity;
 
   cards.forEach((card, index) => {
@@ -868,7 +933,7 @@ function createArtistDots() {
   if (cards.length <= 1) {
     dots.classList.remove("is-visible");
 
-    notifyParentResize();
+    notifyParentResize(false);
 
     return;
   }
@@ -918,7 +983,8 @@ function resetArtistScroll() {
     grid.scrollLeft = 0;
 
     updateArtistDots();
-    notifyParentResize();
+
+    notifyParentResize(true);
   });
 }
 
@@ -963,7 +1029,7 @@ function setupArtistIndicator() {
       resetArtistScroll();
     }
 
-    notifyParentResize();
+    notifyParentResize(true);
   });
 }
 
@@ -992,7 +1058,7 @@ function renderPreparingMessage() {
     dots.classList.remove("is-visible");
   }
 
-  notifyParentResize();
+  notifyParentResize(true);
 }
 
 // ============================================================
@@ -1036,8 +1102,8 @@ function renderArtists() {
     grid.appendChild(createArtistCard(artist));
   });
 
-  // 카드가 실제 DOM에 추가된 이후 높이 측정
-  notifyParentResize();
+  // 카드가 실제로 DOM에 추가된 이후 높이 측정
+  notifyParentResize(true);
 }
 
 // ============================================================
@@ -1045,8 +1111,11 @@ function renderArtists() {
 // ============================================================
 
 renderPageHeader();
+
 renderArtists();
+
 setupArtistIndicator();
+
 setupIframeResizeObserver();
 
 // ============================================================
@@ -1054,9 +1123,9 @@ setupIframeResizeObserver();
 // ============================================================
 
 window.addEventListener("load", () => {
-  notifyParentResize();
+  notifyParentResize(true);
 
   requestAnimationFrame(() => {
-    notifyParentResize();
+    notifyParentResize(true);
   });
 });
